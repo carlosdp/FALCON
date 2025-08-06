@@ -17,6 +17,7 @@ class DecLocomotionPolicy(BasePolicy):
     def __init__(
         self, config, model_path, rl_rate=50, policy_action_scale=0.25
     ):
+
         super().__init__(config, model_path, rl_rate, policy_action_scale)
         self.num_lower_dofs = self.num_dofs - self.num_upper_dofs
 
@@ -43,6 +44,10 @@ class DecLocomotionPolicy(BasePolicy):
         # Lower body actions
         self.last_policy_action = policy_action.copy()
         scaled_policy_action = policy_action * self.policy_action_scale
+        
+        # Log action metrics before combining with upper body
+        self.log_action_metrics(policy_action, obs)
+        
         # Combine upper body actions
         scaled_policy_action = np.concatenate([scaled_policy_action, self.ref_upper_dof_pos], axis=1)
         

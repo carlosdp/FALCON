@@ -88,6 +88,9 @@ class LocoManipPolicy(DecLocomotionPolicy):
         # WBC actions
         self.last_policy_action = policy_action.copy()
         scaled_policy_action = policy_action * self.policy_action_scale
+        
+        # Log action metrics
+        self.log_action_metrics(policy_action, obs)
 
         if self.residual_upper_body_action:
             scaled_policy_action[:, self.upper_dof_indices] += (

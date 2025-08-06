@@ -5,6 +5,7 @@ import yaml
 import argparse
 import numpy as np
 import onnxruntime
+import wandb
 from loop_rate_limiters import RateLimiter
 from sshkeyboard import listen_keyboard
 from termcolor import colored
@@ -42,6 +43,8 @@ class BasePolicy:
         self._init_command_components()
         # Initialize input handlers
         self._init_input_handlers()
+        # Initialize wandb for logging
+        self._init_wandb()
 
     # ============================================================================
     # Initialization Methods
@@ -147,6 +150,20 @@ class BasePolicy:
         self._init_rate_handler()
         self._init_input_device()
     
+    def _init_wandb(self):
+        """Initialize wandb for logging observations and actions."""
+        wandb.init(
+            project=self.config.get("wandb_project", "falcon-on-g1"),
+            config={
+                "model_path": self.config.get("model_path", "unknown"),
+                "rl_rate": self.config.get("rl_rate", 50),
+                "policy_action_scale": self.policy_action_scale,
+                "num_dofs": self.num_dofs,
+                "robot_type": self.config.get("SDK_TYPE", "unitree")
+            }
+        )
+        self.step_count = 0
+    
     def _init_rate_handler(self):
         """Initialize ROS handler if enabled."""
         from loguru import logger
@@ -240,6 +257,34 @@ class BasePolicy:
                 obs_dim_dict[key] += self.obs_dims[obs_name]
         return obs_dim_dict
     
+    def log_action_metrics(self, policy_action, obs=None):
+        """Log action metrics and observations to wandb."""
+        log_data = {
+            "step": self.step_count,
+        }
+        
+        # Log individual observation components if provided
+        if obs is not None:
+            for key, value in obs.items():
+                # Flatten the observation array for logging
+                flat_obs = value.flatten()
+                for i, val in enumerate(flat_obs):
+                    log_data[f"obs/{key}_{i}"] = val
+        
+        # Log joint actions (both unscaled and scaled)
+        scaled_action = policy_action * self.policy_action_scale
+        for i in range(policy_action.shape[1]):
+            log_data[f"action/joint_{i}_raw"] = policy_action[0, i]
+            log_data[f"action/joint_{i}_scaled"] = scaled_action[0, i]
+        
+        # Log aggregated metrics
+        log_data["metrics/action_mean"] = np.mean(policy_action)
+        log_data["metrics/action_std"] = np.std(policy_action)
+        log_data["metrics/action_max"] = np.max(np.abs(policy_action))
+        
+        wandb.log(log_data)
+        self.step_count += 1
+    
     def rl_inference(self, robot_state_data):
         """Perform RL inference to get policy action."""
         obs = self.prepare_obs_for_rl(robot_state_data)
@@ -248,6 +293,9 @@ class BasePolicy:
         
         self.last_policy_action = policy_action.copy()
         self.scaled_policy_action = policy_action * self.policy_action_scale
+        
+        # Log metrics
+        self.log_action_metrics(policy_action, obs)
         
         return self.scaled_policy_action
 
@@ -286,6 +334,46 @@ class BasePolicy:
         """Prepare observations for RL inference."""
         current_obs_buffer_dict = self.get_current_obs_buffer_dict(robot_state_data)
         current_obs_dict = self.parse_current_obs_dict(current_obs_buffer_dict)
+        
+        # Log raw observation components to wandb
+        if hasattr(self, 'step_count'):
+            raw_obs_log = {}
+            for obs_name, obs_value in current_obs_buffer_dict.items():
+                if obs_name in ["base_quat", "base_ang_vel", "dof_pos", "dof_vel", "projected_gravity"]:
+                    flat_obs = obs_value.flatten()
+                    for i, val in enumerate(flat_obs):
+                        raw_obs_log[f"raw_obs/{obs_name}_{i}"] = val
+            
+            # Log DOF positions relative to default angles
+            dof_pos_rel = current_obs_buffer_dict["dof_pos"].flatten()
+            for i, val in enumerate(dof_pos_rel):
+                raw_obs_log[f"dof/pos_rel_{i}"] = val
+            
+            # Log DOF velocities
+            dof_vel = current_obs_buffer_dict["dof_vel"].flatten()
+            for i, val in enumerate(dof_vel):
+                raw_obs_log[f"dof/vel_{i}"] = val
+            
+            # Calculate IMU angle (tilt from upright)
+            # projected_gravity is the gravity vector in the robot's frame
+            # When perfectly upright, it should be [0, 0, -1]
+            projected_grav = current_obs_buffer_dict["projected_gravity"].flatten()
+            # Calculate angle from vertical using the z-component
+            # When upright, z = -1, when tilted, z > -1
+            # Angle = arccos(-z) in radians, convert to degrees
+            z_component = projected_grav[2]
+            # Clamp to avoid numerical issues with arccos
+            z_component = np.clip(z_component, -1.0, 1.0)
+            imu_angle_rad = np.arccos(-z_component)
+            imu_angle_deg = np.degrees(imu_angle_rad)
+            raw_obs_log["metrics/imu_angle"] = imu_angle_deg
+            
+            # Also log the tilt components (roll and pitch approximation)
+            # Using small angle approximation: x component ~ roll, y component ~ pitch
+            raw_obs_log["metrics/imu_roll_component"] = np.degrees(np.arctan2(projected_grav[1], -projected_grav[2]))
+            raw_obs_log["metrics/imu_pitch_component"] = np.degrees(np.arctan2(projected_grav[0], -projected_grav[2]))
+            
+            wandb.log(raw_obs_log)
         
         # Update observation buffers
         self.obs_buf_dict = {
@@ -463,6 +551,8 @@ class BasePolicy:
             self.command_sender.kp_level += 0.1
         elif keycode == "0":
             self.command_sender.kp_level = 1.0
+
+        print(f"KP Level: {self.command_sender.kp_level}")
     
     def _handle_joystick_kp_control(self, keycode):
         """Handle joystick KP control."""
@@ -495,6 +585,8 @@ class BasePolicy:
                 self.rate.sleep()
         except KeyboardInterrupt:
             pass
+        finally:
+            wandb.finish()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Robot")
