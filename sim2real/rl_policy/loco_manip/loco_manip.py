@@ -13,7 +13,8 @@ import pinocchio as pin
 from sim2real.rl_policy.dec_loco.dec_loco import DecLocomotionPolicy
 
 from termcolor import colored
-from sim2real.utils.arm_ik.robot_arm_ik_g1_23dof import G1_29_ArmIK_NoWrists
+# from sim2real.utils.arm_ik.robot_arm_ik_g1_23dof import G1_29_ArmIK_NoWrists
+from sim2real.utils.arm_ik.robot_arm_ik import G1_29_ArmIK
 
 
 class LocoManipPolicy(DecLocomotionPolicy):
@@ -40,7 +41,7 @@ class LocoManipPolicy(DecLocomotionPolicy):
 
     def init_upper_body_controller(self):
         if self.config["ROBOT_TYPE"] == "g1_29dof":
-            self.upper_body_controller = G1_29_ArmIK_NoWrists(
+            self.upper_body_controller = G1_29_ArmIK(
                 Unit_Test=False, Visualization=False, robot_config=self.config
             )
         else:
