@@ -1,3 +1,4 @@
+import os
 import sys
 import threading
 import time
@@ -45,6 +46,7 @@ class BasePolicy:
         self._init_input_handlers()
         # Initialize wandb for logging
         self._init_wandb()
+        self.use_wandb = False
 
     # ============================================================================
     # Initialization Methods
@@ -154,16 +156,18 @@ class BasePolicy:
     
     def _init_wandb(self):
         """Initialize wandb for logging observations and actions."""
-        wandb.init(
-            project=self.config.get("wandb_project", "falcon-on-g1"),
-            config={
-                "model_path": self.config.get("model_path", "unknown"),
-                "rl_rate": self.config.get("rl_rate", 50),
-                "policy_action_scale": self.policy_action_scale,
-                "num_dofs": self.num_dofs,
-                "robot_type": self.config.get("SDK_TYPE", "unitree")
-            }
-        )
+        if os.environ.get("WANDB", None):
+            wandb.init(
+                project=self.config.get("wandb_project", "falcon-on-g1"),
+                config={
+                    "model_path": self.config.get("model_path", "unknown"),
+                    "rl_rate": self.config.get("rl_rate", 50),
+                    "policy_action_scale": self.policy_action_scale,
+                    "num_dofs": self.num_dofs,
+                    "robot_type": self.config.get("SDK_TYPE", "unitree")
+                }
+            )
+            self.use_wandb = True
         self.step_count = 0
     
     def _init_rate_handler(self):
@@ -261,6 +265,9 @@ class BasePolicy:
     
     def log_action_metrics(self, policy_action, obs=None):
         """Log action metrics and observations to wandb."""
+        if not self.use_wandb:
+            return
+
         log_data = {
             "step": self.step_count,
         }
@@ -338,7 +345,7 @@ class BasePolicy:
         current_obs_dict = self.parse_current_obs_dict(current_obs_buffer_dict)
         
         # Log raw observation components to wandb
-        if hasattr(self, 'step_count'):
+        if hasattr(self, 'step_count') and self.use_wandb:
             raw_obs_log = {}
             for obs_name, obs_value in current_obs_buffer_dict.items():
                 if obs_name in ["base_quat", "base_ang_vel", "dof_pos", "dof_vel", "projected_gravity"]:
@@ -500,6 +507,8 @@ class BasePolicy:
             self._handle_init_state()
         elif keycode in ["4", "5", "6", "7", "0"]:
             self._handle_kp_control(keycode)
+        elif keycode in [";", "'"]:
+            self._handle_gait_control(keycode)
     
     def handle_joystick_button(self, cur_key):
         """Handle joystick button presses."""
@@ -555,6 +564,15 @@ class BasePolicy:
             self.command_sender.kp_level = 1.0
 
         print(f"KP Level: {self.command_sender.kp_level}")
+
+    def _handle_gait_control(self, keycode):
+        """Handle keyboard KP control."""
+        if keycode == ";":
+            self.gait_period -= 0.1
+        elif keycode == "'":
+            self.gait_period += 0.1
+
+        print(f"GAIT PERIOD: {self.gait_period}")
     
     def _handle_joystick_kp_control(self, keycode):
         """Handle joystick KP control."""
@@ -588,7 +606,8 @@ class BasePolicy:
         except KeyboardInterrupt:
             pass
         finally:
-            wandb.finish()
+            if self.use_wandb:
+                wandb.finish()
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Robot")
