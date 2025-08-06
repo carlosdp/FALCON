@@ -115,6 +115,8 @@ class BasePolicy:
         """Initialize state processor and command sender using the wrapper."""
         self.state_processor = create_state_processor(self.config)
         self.command_sender = create_command_sender(self.config)
+        # NOTE: DEBUG Start with 20% KP
+        self.command_sender.kp_level = 0.2
     
     def _init_policy_components(self, model_path, policy_action_scale, rl_rate):
         """Initialize policy-related components."""
