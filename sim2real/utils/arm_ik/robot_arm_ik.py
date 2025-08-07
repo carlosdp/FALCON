@@ -269,10 +269,12 @@ class G1_29_ArmIK:  # noqa: N801
                 print("Self-collision detected. Rejecting solution.")
                 return current_lr_arm_motor_q, np.zeros(self.reduced_robot.model.nv)
 
+            # Add velocity damping for stability
+            damping_factor = 0.05
             if current_lr_arm_motor_dq is not None:
-                v = current_lr_arm_motor_dq * 0.0
+                v = current_lr_arm_motor_dq * damping_factor
             else:
-                v = (sol_q - self.init_data) * 0.0
+                v = (sol_q - self.init_data) * damping_factor
 
             self.init_data = sol_q
 
@@ -303,10 +305,12 @@ class G1_29_ArmIK:  # noqa: N801
             self.smooth_filter.add_data(sol_q)
             sol_q = self.smooth_filter.filtered_data
 
+            # Add velocity damping for stability
+            damping_factor = 0.05
             if current_lr_arm_motor_dq is not None:
-                v = current_lr_arm_motor_dq * 0.0
+                v = current_lr_arm_motor_dq * damping_factor
             else:
-                v = (sol_q - self.init_data) * 0.0
+                v = (sol_q - self.init_data) * damping_factor
 
             self.init_data = sol_q
 
